@@ -1,0 +1,171 @@
+---
+## CONFIGURING CRYPTOGRAPHY AND ENCRYPTION (CA WITH SSL)
+- name: install openssl
+  yum:
+    name: openssl
+    state: present
+
+- name: generate CA key
+  openssl_privatekey:
+    path: /etc/ssl/private/ca.key
+    size: 4096
+  register: ca_ssl_key
+
+- name: generate CA certificate
+  openssl_csr:
+    path: /etc/ssl/certs/ca.csr
+    privatekey_path: /etc/ssl/private/ca.key
+    common_name: "CA WITH SSL FOR CENTOS"
+    country_name: "PH"
+    state_or_province_name: "Manila"
+    locality_name: "Anonas"
+    organization_name: "IT Organization"
+    email_address: "qtsgenon@tip.edu.ph"
+    use_common_name_for_san: false
+  register: ca_csr
+
+- name: self signed CA certificate
+  openssl_certificate:
+    path: /etc/ssl/certs/ca.crt
+    privatekey_path: /etc/ssl/private/ca.key
+    csr_path: /etc/ssl/certs/ca.csr
+    provider: selfsigned
+    force: true
+
+- name: copy the cert to the remote users
+  copy:
+    src: /etc/ssl/certs/ca-certificates.crt
+    dest: /etc/pki/ca-trust/source/anchors/
+
+
+## INSTALL AND CONFIGURE ENTERPRISE FIREWALL
+- name: install firewalld on CentOS
+  yum:
+    name: firewalld
+    state: present
+  when: ansible_distribution == "CentOS"
+
+- name: enable firewalld
+  service:
+    name: firewalld
+    state: started
+  when: ansible_distribution == "CentOS"
+
+- name: start firewalld
+  service:
+    name: firewalld
+    state: started
+  when: ansible_distribution == "CentOS"
+
+- name: allow SSH
+  firewalld:
+    zone: public
+    service: ssh
+    permanent: true
+    state: enabled
+  when: ansible_distribution == "CentOS"
+
+- name: allow HTTP traffic
+  firewalld:
+    zone: public
+    port: 80/tcp
+    permanent: true
+    state: enabled
+  when: ansible_distribution == "CentOS"
+
+- name: allow HTTPS traffic
+  firewalld:
+    zone: public
+    port: 443/tcp
+    permanent: true
+    state: enabled
+  when: ansible_distribution == "CentOS"
+
+- name: allow custom port range
+  firewalld:
+    zone: public
+    port: 60000-61000/tcp
+    permanent: true
+    state: enabled
+  when: ansible_distribution == "CentOS"
+
+- name: reload firewalld
+  command: firewall-cmd --reload
+  when: ansible_distribution == "CentOS"
+  
+## INSTALL AND CONFIGURE SURICATA FOR IDS/IPS
+- name: Add Suricata YUM repository
+  yum_repository:
+    name: suricata-stable
+    description: Suricata stable repository
+    baseurl: https://suricata-ids.org/centos/$releasever/$basearch/
+    gpgcheck: yes
+    gpgkey: https://suricata-ids.org/repository/RPM-GPG-KEY-suricataids.asc
+    enabled: yes
+  when: ansible_distribution == 'CentOS'
+
+#COMMENT OUT WHEN ALREADY INSTALLED
+#- name: Install Suricata and supporting packages
+#  yum:
+#    name:
+#      - epel-release
+#      - suricata
+#      - suricata-update
+#      - python3-pip
+#    state: present
+#  when: ansible_distribution == 'CentOS'
+
+- name: Create Suricata configuration file
+  file:
+    path: /etc/default/suricata
+    state: touch
+  when: ansible_distribution == 'CentOS'
+
+- name: Add Suricata configuration
+  lineinfile:
+    path: /etc/default/suricata
+    line: "{{ item }}"
+  loop:
+    - "LISTENMODE=nfqueue"
+    - "IFACE=ens3"
+  when: ansible_distribution == 'CentOS'
+
+- name: Create Suricata rulesfile
+  file:
+    path: /var/lib/suricata.rules
+    state: touch
+  when: ansible_distribution == 'CentOS'
+
+- name: Add set of rules to Suricata
+  lineinfile:
+    path: /var/lib/suricata.rules
+    line: "{{ item }}"
+  loop:
+    - "sed -i -e '/ATTACK_RESPONSE/ s/^alert/drop/' /var/lib/suricata/rules/suricata.rules"
+    - "sed -i -e '/USER_AGENTS/ s/^alert/drop/' /var/lib/suricata/rules/suricata.rules"
+  when: ansible_distribution == 'CentOS'
+
+- name: Create Suricata configuration directory
+  file:
+    path: /etc/suricata/
+    state: directory
+  when: ansible_distribution == 'CentOS'
+
+- name: Create Suricata yaml file
+  file:
+    path: /etc/suricata/suricata.yaml
+    state: touch
+  when: ansible_distribution == 'CentOS'
+
+- name: Configure Suricata to use NFQUEUE
+  lineinfile:
+    path: /etc/suricata/suricata.yaml
+    regexp: '^.*mode:.*$'
+    line: '  mode: nfqueue'
+  when: ansible_distribution == 'CentOS'
+
+#- name: Restart Suricata service
+#  service:
+#    name: suricata
+#    state: restarted
+#  when: ansible_distribution == 'CentOS'

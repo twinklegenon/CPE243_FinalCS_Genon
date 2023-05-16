@@ -1,0 +1,197 @@
+---
+## CONFIGURING CRYPTOGRAPHY AND ENCRYPTION (CA WITH SSL)
+- name: install openssl
+  apt:
+    name: openssl
+    state: present
+
+- name: generate CA key
+  openssl_privatekey:
+    path: /etc/ssl/private/ca.key
+    size: 4096
+  register: ca_ssl_key
+
+- name: generate CA certificate
+  openssl_csr:
+    path: /etc/ssl/certs/ca.csr
+    privatekey_path: /etc/ssl/private/ca.key
+    common_name: "CA WITH SSL"
+    country_name: "PH"
+    state_or_province_name: "Manila"
+    locality_name: "Anonas"
+    organization_name: "IT Organization"
+    email_address: "qtsgenon@tip.edu.ph"
+  register: ca_csr
+
+- name: self signed CA certificate
+  openssl_certificate:
+    path: /etc/ssl/certs/ca.crt
+    privatekey_path: /etc/ssl/private/ca.key
+    csr_path: /etc/ssl/certs/ca.csr
+    provider: selfsigned
+    force: true
+
+- name: copy the cert to the remote users
+  copy:
+    src: /etc/ssl/certs/ca-certificates.crt
+    dest: /etc/pki/ca-trust/source/anchors/
+
+
+## INSTALL AND CONFIGURE ENTERPRISE FIREWALL
+- name: install ufw on Ubuntu
+  apt:
+    name: ufw
+    state: present
+  when: ansible_distribution == "Ubuntu"
+
+- name: allow everything and enable ufw
+  ufw:
+    state: enabled
+    policy: allow
+  when: ansible_distribution == "Ubuntu"
+
+- name: set logging
+  ufw:
+    logging: 'on'
+  when: ansible_distribution == "Ubuntu"
+
+- ufw:
+    rule: reject
+    port: auth
+    log: yes
+  when: ansible_distribution == "Ubuntu"
+
+- name: Deny TCP
+  ufw:
+    rule: deny
+    port: telnet
+    proto: tcp
+  when: ansible_distribution == "Ubuntu"
+
+- ufw:
+    rule: limit
+    port: ssh
+    proto: tcp
+  when: ansible_distribution == "Ubuntu"
+
+- name: Allow ssh
+  ufw:
+    rule: allow
+    name: OpenSSH
+  when: ansible_distribution == "Ubuntu"
+
+- name: allow OpenSSH rule
+  ufw:
+    rule: allow
+    name: OpenSSH
+  when: ansible_distribution == "Ubuntu"
+
+- name: Deny all access to port 53 DNS
+  ufw:
+    rule: deny
+    port: '53'
+  when: ansible_distribution == "Ubuntu"
+
+- name: Allow port range 60000-61000
+  ufw:
+    rule: allow
+    port: 60000:61000
+    proto: tcp
+  when: ansible_distribution == "Ubuntu"
+
+- name: Allow all access to tcp port 80 [HTTP TRAFFIC]
+  ufw:
+    rule: allow
+    port: '80'
+    proto: tcp
+  when: ansible_distribution == "Ubuntu"
+
+- name: Allow all access to tcp port 443 [HTTPS TRAFFIC]
+  ufw:
+    rule: allow
+    port: '443'
+    proto: tcp
+  when: ansible_distribution == "Ubuntu"
+
+- name: Allow all access from RFC1918 networks to this host
+  ufw:
+    rule: allow
+    src: 192.168.56.132
+  loop:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0
+  when: ansible_distribution == "Ubuntu"
+
+## INSTALL AND CONFIGURE SURICATA FOR IDS/IPS
+- name: Add Suricata PPA repository
+  apt_repository:
+    repo: 'ppa:oisf/suricata-stable'
+    update_cache: yes
+  when: ansible_distribution == 'Ubuntu'
+
+##COMMENT OUT WHEN ALREADY INSTALLED
+# - name: Install Suricata and supporting packages
+#   apt:
+#     name: "{{ item }}"
+#     state: present
+#   loop:
+#     - suricata
+#     - suricata-update
+#     - python3-pip
+#   when: ansible_distribution == 'Ubuntu'
+
+- name: Create Suricata configuration file
+  file:
+    path: /etc/default/suricata
+    state: touch
+  when: ansible_distribution == 'Ubuntu'
+
+- name: Add Suricata configuration
+  lineinfile:
+    path: /etc/default/suricata
+    line: "{{ item }}"
+  loop:
+    - "LISTENMODE=nfqueue"
+    - "IFACE=ens3"
+  when: ansible_distribution == 'Ubuntu'
+
+- name: Create Suricata rulesfile
+  file:
+    path: /var/lib/suricata.rules
+    state: touch
+  when: ansible_distribution == 'Ubuntu'
+
+- name: Add set of rules to Suricata
+  lineinfile:
+    path: /var/lib/suricata.rules
+    line: "{{ item }}"
+  loop:
+    - "sed -i -e '/ATTACK_RESPONSE/ s/^alert/drop/' /var/lib/suricata/rules/suricata.rules"
+    - "sed -i -e '/USER_AGENTS/ s/^alert/drop/' /var/lib/suricata/rules/suricata.rules"
+  when: ansible_distribution == 'Ubuntu'
+
+- name: Create Suricata configuration directory
+  file:
+    path: /etc/suricata/
+    state: directory
+  when: ansible_distribution == 'Ubuntu'
+
+- name: Create suricata yaml file
+  file:
+    path: /etc/suricata/suricata.yaml
+    state: touch
+  when: ansible_distribution == 'Ubuntu'
+
+- name: Configure Suricata to use NFQUEUE
+  lineinfile:
+    path: /etc/suricata/suricata.yaml
+    regexp: '^.*mode:.*$'
+    line: '  mode: nfqueue'
+  when: ansible_distribution == 'Ubuntu'
+
+- name: Restart Suricata service
+  service:
+    name: suricata
+    state: restarted
+  when: ansible_distribution == 'Ubuntu'
